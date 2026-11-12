@@ -86,11 +86,15 @@ For more advanced usage, including parallel tool calls and different model-speci
 ### Tool Definition Extensions
 
 When rendering function tools with a Hugging Face chat template, vLLM preserves
-additional fields supplied in Chat Completions tool definitions, including fields
-inside `function`. For the Responses API, additional fields on a flat function
-tool are passed inside `function` in the chat-template tool representation.
-This lets templates consume output schemas such as `response` or `return` and
-other custom metadata without copying them into the tool description.
+arbitrary additional JSON keys supplied in Chat Completions tool definitions,
+including fields inside `function`. There is no extension-key allowlist or
+required `x-` prefix: fields such as `permissions`, `cost`, `client_metadata`,
+`response`, and `return` are all passed through. Nested objects, arrays, and
+explicit null values are preserved too.
+
+For the Responses API, additional fields on a flat function tool are passed
+inside `function` in the chat-template tool representation. The same applies to
+function definitions inside namespaces, whose names are flattened as usual.
 
 These fields are passed through as data; they do not enable additional
 server-side validation or decoding constraints. The chat template determines

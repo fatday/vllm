@@ -90,9 +90,11 @@ async def test_render_preserves_tool_extensions(client, api):
         "name": "get_weather",
         "description": "Get the weather",
         "parameters": {"type": "object", "properties": {}},
-        "response": {"type": "number", "x-unit": "celsius"},
-        "return": {"type": "number"},
-        "x-metadata": {"labels": ["weather"], "optional": None},
+        "labels": ["weather"],
+        "cost": 0.25,
+        "custom_flag": False,
+        "nullable": None,
+        "client_metadata": {"nested": [0, "unit", {}]},
     }
     tool = {"type": "function", "function": function}
     payload: dict[str, Any] = {
@@ -103,7 +105,7 @@ async def test_render_preserves_tool_extensions(client, api):
     if api == "responses":
         payload.update(input=messages, tools=[{"type": "function", **function}])
     else:
-        tool["x-tool-metadata"] = {"readOnly": True}
+        tool["client_tool_metadata"] = {"readOnly": True}
         payload.update(messages=messages, tools=[tool])
 
     response = await client.post(f"/v1/{api}/render", json=payload)

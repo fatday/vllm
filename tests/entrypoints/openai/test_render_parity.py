@@ -425,14 +425,27 @@ class TestToolsRenderParity:
                 assert function[field_name] is flag
 
     @pytest.mark.parametrize(
-        "field_name,value,namespaced",
+        "extensions,namespaced",
         [
-            ("response", {"type": "object", "x-output": {"nested": [None]}}, False),
-            ("return", {"type": "string", "enum": ["sunny", "rainy"]}, False),
-            ("x-metadata", {"nested": {"labels": ["weather"], "empty": None}}, False),
-            ("x-null", None, False),
-            ("output_schema", None, False),
-            ("async", False, True),
+            ({"response": {"type": "object", "x-output": {"nested": [None]}}}, False),
+            ({"return": {"type": "string", "enum": ["sunny", "rainy"]}}, False),
+            ({"x-metadata": {"nested": {"labels": ["weather"], "empty": None}}}, False),
+            ({"x-null": None}, False),
+            ({"output_schema": None}, False),
+            ({"async": False}, True),
+            (
+                {
+                    "labels": ["weather"],
+                    "cost": 0.25,
+                    "custom_flag": False,
+                    "nullable": None,
+                    "timeout_ms": 0,
+                    "empty_list": [],
+                    "empty_object": {},
+                    "client/metadata": {"nested": [None, True]},
+                },
+                True,
+            ),
         ],
     )
     async def test_function_extensions_reach_chat_template(
@@ -440,14 +453,13 @@ class TestToolsRenderParity:
         online_renderer,
         serving_responses,
         monkeypatch,
-        field_name,
-        value,
+        extensions,
         namespaced,
     ):
         """Both APIs must preserve extensions, not merely strip them equally."""
         parameters = {**_WEATHER_PARAMETERS, "x-schema": {"nested": [None, "unit"]}}
         chat_tools, responses_tools = _weather_tools(
-            overrides={field_name: value, "parameters": parameters}
+            overrides={**extensions, "parameters": parameters}
         )
         if namespaced:
             chat_tools[0]["function"]["name"] = "weather__get_weather"
@@ -467,7 +479,7 @@ class TestToolsRenderParity:
             responses_kwargs={"input": _USER, "tools": responses_tools},
         )
         function = captured.chat_params.chat_template_kwargs["tools"][0]["function"]
-        assert function[field_name] == value
+        assert function == chat_tools[0]["function"]
         assert function["parameters"] == parameters
         assert "async_" not in function
 
