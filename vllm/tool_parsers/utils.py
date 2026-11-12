@@ -226,7 +226,7 @@ def get_function_tools(
             function_tools.extend(
                 FunctionTool.model_validate(
                     {
-                        **namespaced_tool.model_dump(by_alias=True),
+                        **namespaced_tool.model_dump(by_alias=True, exclude_unset=True),
                         "name": flat_namespace_tool_name(
                             tool.name, namespaced_tool.name
                         ),
@@ -278,7 +278,7 @@ def iter_response_function_tool_dicts(
     tools: list[ResponsesTool],
 ) -> list[dict[str, Any]]:
     return [
-        tool.model_dump()
+        tool.model_dump(by_alias=True, exclude_unset=True)
         for tool in get_function_tools(tools)
         if isinstance(tool, FunctionTool)
     ]

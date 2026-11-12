@@ -83,6 +83,23 @@ Remember that it's the caller's responsibility to:
 
 For more advanced usage, including parallel tool calls and different model-specific parsers, see the sections below.
 
+### Tool Definition Extensions
+
+When rendering function tools with a Hugging Face chat template, vLLM preserves
+arbitrary additional JSON keys supplied in Chat Completions tool definitions,
+including fields inside `function`. There is no extension-key allowlist or
+required `x-` prefix: fields such as `permissions`, `cost`, `client_metadata`,
+`response`, and `return` are all passed through. Nested objects, arrays, and
+explicit null values are preserved too.
+
+For the Responses API, additional fields on a flat function tool are passed
+inside `function` in the chat-template tool representation. The same applies to
+function definitions inside namespaces, whose names are flattened as usual.
+
+These fields are passed through as data; they do not enable additional
+server-side validation or decoding constraints. The chat template determines
+which fields appear in the model's prompt.
+
 ## Named Function Calling
 
 vLLM supports named function calling in the chat completion API when the server runs a tool parser. Start the server with both `--enable-auto-tool-choice` and `--tool-call-parser`. vLLM loads the parser named by `--tool-call-parser` only when `--enable-auto-tool-choice` is also set. Without a loaded parser, a request with a named `tool_choice` returns HTTP 400. Requests to models in the official Mistral format and to gpt-oss models are not rejected by this check.
