@@ -2,9 +2,13 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """E2E tests for render endpoints via `vllm launch` (GPU-less serving)."""
 
+import json
+from typing import Any
+
 import httpx
 import pytest
 import pytest_asyncio
+from transformers import AutoTokenizer
 
 from tests.utils import RemoteLaunchRenderServer
 
@@ -12,8 +16,12 @@ MODEL_NAME = "vllm-project/tiny-random-LlamaForCausalLM"
 
 
 @pytest.fixture(scope="module")
-def server():
+def server(request, tmp_path_factory):
     args: list[str] = []
+    if getattr(request, "param", None) == "tools":
+        template = tmp_path_factory.mktemp("tools") / "chat_template.jinja"
+        template.write_text("{{ tools | tojson }}")
+        args = ["--chat-template", str(template)]
     with RemoteLaunchRenderServer(MODEL_NAME, args, max_wait_seconds=120) as srv:
         yield srv
 
@@ -71,6 +79,38 @@ async def test_chat_render_multi_turn(client):
     assert "token_ids" in data
     assert isinstance(data["token_ids"], list)
     assert len(data["token_ids"]) > 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("server", ["tools"], indirect=True)
+@pytest.mark.parametrize("api", ["chat/completions", "responses"])
+async def test_render_preserves_tool_extensions(client, api):
+    """Tool extensions must survive HTTP validation into real template tokens."""
+    function = {
+        "name": "get_weather",
+        "description": "Get the weather",
+        "parameters": {"type": "object", "properties": {}},
+        "response": {"type": "number", "x-unit": "celsius"},
+        "return": {"type": "number"},
+        "x-metadata": {"labels": ["weather"], "optional": None},
+    }
+    tool = {"type": "function", "function": function}
+    payload: dict[str, Any] = {
+        "model": MODEL_NAME,
+        "tool_choice": "none",
+    }
+    messages = [{"role": "user", "content": "Hello"}]
+    if api == "responses":
+        payload.update(input=messages, tools=[{"type": "function", **function}])
+    else:
+        tool["x-tool-metadata"] = {"readOnly": True}
+        payload.update(messages=messages, tools=[tool])
+
+    response = await client.post(f"/v1/{api}/render", json=payload)
+    assert response.status_code == 200, response.text
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    prompt = tokenizer.decode(response.json()["token_ids"], skip_special_tokens=True)
+    assert json.loads(prompt) == [tool]
 
 
 @pytest.mark.asyncio

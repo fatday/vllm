@@ -172,7 +172,7 @@ async def _assert_parity(
     *,
     chat_kwargs: dict[str, Any],
     responses_kwargs: dict[str, Any],
-) -> None:
+) -> CapturedRenderInputs:
     """Build paired requests, capture HF render inputs, and assert equality."""
     chat_req = ChatCompletionRequest(model=_MODEL, **chat_kwargs)
     responses_req = ResponsesRequest(model=_MODEL, **responses_kwargs)
@@ -193,6 +193,7 @@ async def _assert_parity(
     assert dict(chat_params.chat_template_kwargs) == dict(
         responses_params.chat_template_kwargs
     )
+    return chat
 
 
 def _weather_tools(
@@ -393,18 +394,15 @@ class TestToolsRenderParity:
             },
         )
 
+    @pytest.mark.parametrize("flag", [None, False, True])
     async def test_function_tool_optional_fields(
-        self, online_renderer, serving_responses, monkeypatch
+        self, online_renderer, serving_responses, monkeypatch, flag
     ):
         """Optional FunctionDefinition fields dump the same on both APIs."""
         chat_tools, responses_tools = _weather_tools(
-            overrides={
-                "strict": True,
-                "defer_loading": False,
-                "unrelated_extra": "should_be_ignored",
-            }
+            overrides={"strict": flag, "defer_loading": flag}
         )
-        await _assert_parity(
+        captured = await _assert_parity(
             online_renderer,
             serving_responses,
             monkeypatch,
@@ -419,6 +417,71 @@ class TestToolsRenderParity:
                 "tool_choice": "auto",
             },
         )
+        function = captured.chat_params.chat_template_kwargs["tools"][0]["function"]
+        for field_name in ("strict", "defer_loading"):
+            if flag is None:
+                assert field_name not in function
+            else:
+                assert function[field_name] is flag
+
+    @pytest.mark.parametrize(
+        "field_name,value,namespaced",
+        [
+            ("response", {"type": "object", "x-output": {"nested": [None]}}, False),
+            ("return", {"type": "string", "enum": ["sunny", "rainy"]}, False),
+            ("x-metadata", {"nested": {"labels": ["weather"], "empty": None}}, False),
+            ("x-null", None, False),
+            ("output_schema", None, False),
+            ("async", False, True),
+        ],
+    )
+    async def test_function_extensions_reach_chat_template(
+        self,
+        online_renderer,
+        serving_responses,
+        monkeypatch,
+        field_name,
+        value,
+        namespaced,
+    ):
+        """Both APIs must preserve extensions, not merely strip them equally."""
+        parameters = {**_WEATHER_PARAMETERS, "x-schema": {"nested": [None, "unit"]}}
+        chat_tools, responses_tools = _weather_tools(
+            overrides={field_name: value, "parameters": parameters}
+        )
+        if namespaced:
+            chat_tools[0]["function"]["name"] = "weather__get_weather"
+            responses_tools = [
+                {
+                    "type": "namespace",
+                    "name": "weather",
+                    "description": "",
+                    "tools": responses_tools,
+                }
+            ]
+        captured = await _assert_parity(
+            online_renderer,
+            serving_responses,
+            monkeypatch,
+            chat_kwargs={"messages": _USER, "tools": chat_tools},
+            responses_kwargs={"input": _USER, "tools": responses_tools},
+        )
+        function = captured.chat_params.chat_template_kwargs["tools"][0]["function"]
+        assert function[field_name] == value
+        assert function["parameters"] == parameters
+        assert "async_" not in function
+
+    async def test_chat_tool_extensions_reach_chat_template(
+        self, online_renderer, monkeypatch
+    ):
+        """Outer tool extensions retain their location and nested values."""
+        tool = {**_CHAT_WEATHER_TOOL, "x-tool": {"nested": [None, {"tag": "custom"}]}}
+        captured = await _capture_chat(
+            online_renderer,
+            ChatCompletionRequest(model=_MODEL, messages=_USER, tools=[tool]),
+            monkeypatch,
+        )
+        assert captured.chat_params.chat_template_kwargs["tools"] == [tool]
 
 
 @pytest.mark.asyncio
